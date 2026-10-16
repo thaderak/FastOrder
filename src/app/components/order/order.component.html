@@ -1,0 +1,417 @@
+<div class="dashboard-shell">
+<aside class="sidebar">
+  <a class="sidebar-brand" href="/" aria-label="FastOrder inicio"><span class="logo-mark"><app-icon name="Flame" /></span><span>Fast<span class="brand-accent">Order</span><small>HECHO A TU GUSTO</small></span></a>
+  <span class="nav-caption">PRINCIPAL</span>
+  <nav aria-label="Navegación principal">
+    <button [class.selected]="view() === 'menu'" (click)="view.set('menu')"><app-icon name="LayoutDashboard" /> Menú y pedidos <span class="nav-dot"></span></button>
+    <button [class.selected]="view() === 'history'" (click)="view.set('history')"><app-icon name="History" /> Mis pedidos <span class="nav-count">{{ orderService.orderHistory().length }}</span></button>
+  </nav>
+  <div class="sidebar-bottom"><div class="offline-tip"><app-icon name="WifiOff" /><strong>Siempre a tu alcance</strong><p>Explora el menú incluso sin conexión. Tus pedidos se enviarán al reconectar.</p></div><div class="store-profile"><span>FO</span><div><strong>FastOrder S.A.</strong><small>Restaurante · Perú</small></div></div></div>
+</aside>
+<div class="fastorder-app">
+  <!-- BARRA DE ESTADO Y CABECERA SUPERIOR -->
+  <header class="app-header">
+    <div class="brand-container">
+      
+      <div class="brand-text">
+        <h1>Tu próxima comida empieza aquí</h1>
+        <p class="subtitle">Elige, personaliza y disfruta. Nosotros nos encargamos del resto.</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <!-- Indicador de Red Online / Offline -->
+      <div
+        class="network-badge"
+        [class.online]="orderService.isOnline()"
+        [class.offline]="!orderService.isOnline()"
+      >
+        <span class="pulse-dot"></span>
+        <span class="status-label">{{ orderService.isOnline() ? 'En Línea' : 'Modo Offline' }}</span>
+        @if (orderService.pendingCount() > 0) {
+          <span class="pending-pill" (click)="syncNow()" title="Clic para sincronizar con cocina">
+            {{ orderService.pendingCount() }} pendiente(s)
+          </span>
+        }
+      </div>
+
+      <!-- Botón de Notificaciones Push -->
+      @if (notificationService.permissionStatus() !== 'granted') {
+        <button
+          type="button"
+          class="btn-icon notify-btn"
+          (click)="requestNotificationPermission()"
+          title="Activar notificaciones de estado de pedido"
+        >
+          <app-icon name="Bell" />
+        </button>
+      }
+
+      <!-- Botón de Instalación PWA (A2HS) -->
+      @if (canInstallPwa()) {
+        <button
+          type="button"
+          class="btn-install-pwa"
+          (click)="promptInstallPwa()"
+        >
+          <app-icon name="Download" /> Instalar App
+        </button>
+      }
+    </div>
+  </header>
+
+<div class="page-heading"><div><span class="eyebrow">FASTORDER / {{ view() === 'menu' ? 'MENÚ' : 'MIS PEDIDOS' }}</span><h2>{{ view() === 'menu' ? '¿Qué se te antoja hoy?' : 'Tus pedidos' }}</h2><p>{{ view() === 'menu' ? 'Buena comida, sin complicaciones.' : 'Consulta el historial de esta sesión.' }}</p></div><span class="service-label"><app-icon name="ChefHat" /> Preparado al momento</span></div>
+<div class="overview"><div><span class="stat-icon"><app-icon name="Utensils" /></span><div><strong>{{ orderService.products().length }} platos</strong><small>Para todos los gustos</small></div></div><div><span class="stat-icon"><app-icon name="ShoppingBag" /></span><div><strong>{{ orderService.totalItemsCount() }} productos</strong><small>En tu pedido actual</small></div></div><div><span class="stat-icon green"><app-icon name="RefreshCw" /></span><div><strong>{{ orderService.pendingCount() === 0 ? 'Sin pendientes' : orderService.pendingCount() + ' pendientes' }}</strong><small>{{ orderService.pendingCount() === 0 ? 'Todo al día' : 'Por enviar a cocina' }}</small></div></div></div>
+@if (view() === 'history') {
+<section class="history-panel"><h3><app-icon name="History" /> Historial de pedidos</h3>@for (order of orderService.orderHistory(); track order.orderId) {<article class="history-row"><span class="stat-icon"><app-icon name="ShoppingBag" /></span><div><strong>{{ order.orderId }}</strong><p>{{ order.customerName }} · {{ order.tableOrTakeout }}</p><small>{{ order.createdAt | date:'dd/MM/yyyy HH:mm' }}</small></div><span class="history-status">{{ order.status === 'en_preparacion' ? 'En preparación' : order.status }}<small>{{ order.syncStatus === 'synced' ? 'Enviado a cocina' : 'Pendiente de envío' }}</small></span><strong>S/ {{ order.total | number:'1.2-2' }}</strong></article>} @empty {<div class="empty-cart-state"><app-icon name="History" /><h3>Aún no tienes pedidos</h3><p>Tu próximo favorito te espera en el menú.</p><button class="btn-add-primary" (click)="view.set('menu')">Explorar menú <app-icon name="ArrowRight" /></button></div>}</section>
+} @else {
+  <!-- ALERTA DE MODO OFFLINE PERSISTENTE -->
+  @if (!orderService.isOnline()) {
+    <div class="offline-alert-banner">
+      <span class="icon"><app-icon name="WifiOff" /></span>
+      <div class="text">
+        <strong>Operando sin conexión a Internet:</strong> Los pedidos se guardarán en tu dispositivo
+        (IndexedDB) y se transmitirán automáticamente a la cocina cuando vuelva la señal.
+      </div>
+      @if (orderService.pendingCount() > 0) {
+        <button class="btn-sync-retry" (click)="syncNow()" [disabled]="orderService.isSyncing()">
+          {{ orderService.isSyncing() ? 'Sincronizando...' : 'Reintentar Enlace' }}
+        </button>
+      }
+    </div>
+  }
+
+  <!-- SECCIÓN 1: SEGUIMIENTO EN VIVO DEL PEDIDO ACTIVO (SI EXISTE) -->
+  @if (orderService.activeOrder(); as order) {
+    <section class="live-tracker-card">
+      <div class="tracker-header">
+        <div class="ticket-info">
+          <span class="order-id">Orden #{{ order.orderId }}</span>
+          <span class="order-client"><app-icon name="Utensils" /> {{ order.customerName }} &bull; <app-icon name="Utensils" /> {{ order.tableOrTakeout }}</span>
+        </div>
+        <div class="sync-indicator" [class.synced]="order.syncStatus === 'synced'">
+          @if (order.syncStatus === 'synced') {
+            <span><app-icon name="Check" /> Sincronizado en Cocina</span>
+          } @else {
+            <span><app-icon name="Clock" /> Guardado Localmente (Pendiente de Red)</span>
+          }
+        </div>
+      </div>
+
+      <!-- Stepper Visual de Estado de Cocina -->
+      <div class="order-stepper">
+        <!-- Paso 1: Recibido -->
+        <div
+          class="step-item"
+          [class.active]="order.status === 'recibido'"
+          [class.completed]="order.status !== 'recibido'"
+        >
+          <div class="step-circle"><app-icon name="History" /></div>
+          <span class="step-title">Recibido</span>
+          <span class="step-desc">En cola de cocina</span>
+        </div>
+
+        <div class="step-line" [class.filled]="order.status !== 'recibido'"></div>
+
+        <!-- Paso 2: En preparación -->
+        <div
+          class="step-item"
+          [class.active]="order.status === 'en_preparacion'"
+          [class.completed]="order.status === 'listo' || order.status === 'entregado'"
+        >
+          <div class="step-circle"><app-icon name="ChefHat" /></div>
+          <span class="step-title">En Preparación</span>
+          <span class="step-desc">En brasas y parrilla</span>
+        </div>
+
+        <div class="step-line" [class.filled]="order.status === 'listo' || order.status === 'entregado'"></div>
+
+        <!-- Paso 3: Listo -->
+        <div
+          class="step-item"
+          [class.active]="order.status === 'listo'"
+          [class.completed]="order.status === 'entregado'"
+        >
+          <div class="step-circle"><app-icon name="Drumstick" /></div>
+          <span class="step-title">Listo</span>
+          <span class="step-desc">Acércate al mostrador</span>
+        </div>
+
+        <div class="step-line" [class.filled]="order.status === 'entregado'"></div>
+
+        <!-- Paso 4: Entregado -->
+        <div
+          class="step-item"
+          [class.active]="order.status === 'entregado'"
+          [class.completed]="order.status === 'entregado'"
+        >
+          <div class="step-circle"><app-icon name="Check" /></div>
+          <span class="step-title">Entregado</span>
+          <span class="step-desc">¡Buen provecho!</span>
+        </div>
+      </div>
+
+      <!-- Detalle rápido de la orden y simulador de cocina para pruebas -->
+      <div class="tracker-actions">
+        <div class="kitchen-sim-controls">
+          <span class="sim-label">Demo de cocina:</span>
+          @if (order.status === 'recibido') {
+            <button class="btn-sim" (click)="advanceStatus('en_preparacion')"><app-icon name="ArrowRight" /> Pasar a "En Preparación"</button>
+          }
+          @if (order.status === 'en_preparacion') {
+            <button class="btn-sim" (click)="advanceStatus('listo')"><app-icon name="ArrowRight" /> Pasar a "Listo para Entrega"</button>
+          }
+          @if (order.status === 'listo') {
+            <button class="btn-sim" (click)="advanceStatus('entregado')"><app-icon name="ArrowRight" /> Marcar como "Entregado"</button>
+          }
+        </div>
+        <button class="btn-new-order" (click)="resetForNewOrder()">+ Tomar Nuevo Pedido</button>
+      </div>
+    </section>
+  }
+
+  <!-- CUERPO PRINCIPAL: CATÁLOGO Y PANEL DE CARRITO -->
+  <main class="main-layout">
+    <!-- COLUMNA CATÁLOGO DE MENÚ -->
+    <div class="menu-column">
+<section class="menu-banner"><div><span class="eyebrow">EL SABOR QUE NOS UNE</span><h2>Un buen día merece<br>un gran almuerzo.</h2><p>Pollo a la brasa, parrillas y tus acompañamientos favoritos.</p><button (click)="selectedCategory.set('Pollo a la brasa')">Ver nuestros favoritos <app-icon name="ArrowRight" /></button></div><div class="banner-art"><app-icon name="Flame" /><span>AL CARBÓN<br><strong>100% sabor</strong></span></div></section><div class="section-title"><h3>Nuestro menú <span>{{ filteredProducts().length }} opciones</span></h3><span>Recién hecho para ti</span></div>
+      <!-- Buscador y Filtro de Categorías -->
+      <div class="catalog-controls">
+        <div class="search-box">
+          <span class="search-icon"><app-icon name="Search" /></span>
+          <input
+            type="text"
+            aria-label="Buscar productos" placeholder="Buscar tu plato favorito..."
+            [value]="searchQuery()"
+            (input)="searchQuery.set($any($event.target).value)"
+          />
+          @if (searchQuery()) {
+            <button aria-label="Limpiar búsqueda" class="clear-search" (click)="searchQuery.set('')">✕</button>
+          }
+        </div>
+
+        <!-- Chips de Categorías con Scroll Horizontal Táctil -->
+        <div class="categories-scroll">
+          @for (cat of categories; track cat) {
+            <button
+              type="button"
+              class="cat-chip"
+              [class.active]="selectedCategory() === cat"
+              (click)="selectedCategory.set(cat)"
+            >
+              <app-icon [name]="categoryIcons[cat]" />
+              {{ cat }}
+            </button>
+          }
+        </div>
+      </div>
+
+      <!-- Cuadrícula de Productos -->
+      <div class="product-grid">
+        @for (product of filteredProducts(); track product.id) {
+          <article class="product-card">
+            <div class="card-image-wrap">
+              <img
+                [src]="product.imageUrl"
+                [alt]="product.name"
+                loading="lazy"
+                (error)="$any($event.target).src = 'icons/icon-192x192.png'"
+              />
+              @if (product.badge) {
+                <span class="product-badge">{{ product.badge }}</span>
+              }
+            </div>
+
+            <div class="card-body">
+              <span class="card-category">{{ product.category }}</span>
+              <h3 class="product-title">{{ product.name }}</h3>
+              <p class="product-desc">{{ product.description }}</p>
+
+              <div class="card-footer">
+                <div class="price-wrap">
+                  <span class="currency">S/</span>
+                  <span class="amount">{{ product.price | number:'1.2-2' }}</span>
+                </div>
+
+                <!-- Controles interactivos de cantidad (+ / -) -->
+                @if (getItemQuantityInCart(product.id) > 0) {
+                  <div class="qty-control-inline">
+                    <button
+                      type="button"
+                      class="qty-btn minus"
+                      (click)="decreaseQuantity(product.id)"
+                      aria-label="Restar uno"
+                    >
+                      &minus;
+                    </button>
+                    <span class="qty-count">{{ getItemQuantityInCart(product.id) }}</span>
+                    <button
+                      type="button"
+                      class="qty-btn plus"
+                      (click)="addToCart(product)"
+                      aria-label="Sumar uno"
+                    >
+                      +
+                    </button>
+                  </div>
+                } @else {
+                  <button
+                    type="button"
+                    class="btn-add-primary"
+                    (click)="addToCart(product)"
+                  >
+                    + Agregar
+                  </button>
+                }
+              </div>
+            </div>
+          </article>
+        } @empty {
+          <div class="empty-products">
+            <div class="empty-icon"><app-icon name="Utensils" /></div>
+            <p>No se encontraron productos en esta categoría o búsqueda.</p>
+          </div>
+        }
+      </div>
+    </div>
+
+    <!-- COLUMNA LATERAL / PANEL DE CARRITO Y ORDEN -->
+    <aside class="cart-column" [class.drawer-open]="isCartDrawerOpen()">
+      <div class="cart-card">
+        <div class="cart-header">
+          <div class="title-with-badge">
+            <h2>Tu pedido</h2>
+            @if (orderService.totalItemsCount() > 0) {
+              <span class="items-badge">{{ orderService.totalItemsCount() }}</span>
+            }
+          </div>
+          <div class="header-right">
+            @if (orderService.cart().length > 0) {
+              <button type="button" class="btn-clear-cart" (click)="orderService.clearCart()">
+                Vaciar
+              </button>
+            }
+            <button type="button" aria-label="Cerrar pedido" class="btn-close-drawer" (click)="toggleCartDrawer()">✕</button>
+          </div>
+        </div>
+
+        @if (orderService.cart().length > 0) {
+          <!-- Lista de Artículos en el Carrito -->
+          <div class="cart-items-list">
+            @for (item of orderService.cart(); track item.product.id) {
+              <div class="cart-item-row">
+                <div class="item-meta">
+                  <span class="item-name">{{ item.product.name }}</span>
+                  <span class="item-unit-price">S/ {{ item.product.price | number:'1.2-2' }} c/u</span>
+                </div>
+
+                <div class="item-actions">
+                  <div class="qty-control-compact">
+                    <button type="button" (click)="decreaseQuantity(item.product.id)">&minus;</button>
+                    <span>{{ item.quantity }}</span>
+                    <button type="button" (click)="addToCart(item.product)">+</button>
+                  </div>
+                  <span class="item-subtotal">S/ {{ item.subtotal | number:'1.2-2' }}</span>
+                </div>
+              </div>
+            }
+          </div>
+
+          <!-- Datos del Comensal y Cocina -->
+          <div class="order-form-fields">
+            <div class="field-group">
+              <label for="customerName">Tu nombre</label>
+              <input
+                id="customerName"
+                type="text"
+                [(ngModel)]="customerName"
+                placeholder="Ej. Juan Pérez"
+              />
+            </div>
+
+            <div class="field-group">
+              <label for="tableOrTakeout">¿Dónde lo disfrutarás?</label>
+              <select id="tableOrTakeout" [(ngModel)]="tableOrTakeout">
+                <option value="Mesa 01">Mesa 01</option>
+                <option value="Mesa 02">Mesa 02</option>
+                <option value="Mesa 03">Mesa 03</option>
+                <option value="Mesa 04">Mesa 04</option>
+                <option value="Mesa 05">Mesa 05</option>
+                <option value="Barra Mostrador">Barra / Mostrador</option>
+                <option value="Para Llevar">Para Llevar (Empaque)</option>
+              </select>
+            </div>
+
+            <div class="field-group">
+              <label for="orderNotes">Personaliza tu pedido</label>
+              <input
+                id="orderNotes"
+                type="text"
+                [(ngModel)]="orderNotes"
+                placeholder="Ej. Tártara extra, pechuga bien dorada"
+              />
+            </div>
+          </div>
+
+          <!-- Desglose de Totales -->
+          <div class="pricing-breakdown">
+            <div class="price-row">
+              <span>Subtotal:</span>
+              <span>S/ {{ orderService.subtotal() | number:'1.2-2' }}</span>
+            </div>
+            <div class="price-row">
+              <span>IGV (18%)</span>
+              <span>S/ {{ orderService.igv() | number:'1.2-2' }}</span>
+            </div>
+            <div class="price-row total-row">
+              <span>Total</span>
+              <span class="total-amount">S/ {{ orderService.total() | number:'1.2-2' }}</span>
+            </div>
+          </div>
+
+          <!-- Botón de Envío a Cocina -->
+          <button
+            type="button"
+            class="btn-submit-order"
+            [disabled]="isSubmitting()"
+            (click)="submitOrder()"
+          >
+            @if (isSubmitting()) {
+              <span class="loader-spinner"></span> Transmitiendo...
+            } @else {
+              <app-icon name="Flame" /> Enviar Pedido a Cocina (S/ {{ orderService.total() | number:'1.2-2' }})
+            }
+          </button>
+        } @else {
+          <div class="empty-cart-state">
+            <div class="empty-illustration"><app-icon name="ShoppingBag" /></div>
+            <h3>Tu bandeja está vacía</h3>
+            <p>Selecciona tus platillos favoritos del menú para comenzar tu orden.</p>
+          </div>
+        }
+      </div>
+    </aside>
+  </main>
+
+  }
+  <!-- BARRA FLOTANTE MÓVIL (BOTTOM BAR PARA PANTALLAS PEQUEÑAS) -->
+  @if (orderService.totalItemsCount() > 0 && !isCartDrawerOpen()) {
+    <div class="mobile-floating-bar" (click)="toggleCartDrawer()">
+      <div class="bar-info">
+        <span class="badge">{{ orderService.totalItemsCount() }} items</span>
+        <span class="bar-total">Total: S/ {{ orderService.total() | number:'1.2-2' }}</span>
+      </div>
+      <button type="button" class="btn-view-order">
+        Ver Pedido ➔
+      </button>
+    </div>
+  }
+
+  <!-- TELÓN DE FONDO PARA EL MODAL MÓVIL DEL CARRITO -->
+  @if (isCartDrawerOpen()) {
+    <div class="cart-backdrop" (click)="toggleCartDrawer()"></div>
+  }
+</div>
+
+</div>
+
